@@ -1,4 +1,4 @@
-# To-Do List Application - React + Express + MongoDB
+# To-Do List Application 
 
 Aplikasi To-Do List lengkap dengan frontend React dan backend Node.js/Express. Fitur termasuk authentication, priority levels, due dates, edit/delete tasks, dan form validation.
 
@@ -171,8 +171,6 @@ npm run dev
 ```
 
 Server running: `http://localhost:5000`
-
-**Untuk detail lengkap backend, lihat:** [to-do-list-backend/README.md](../to-do-list-backend/README.md)
 
 ---
 
