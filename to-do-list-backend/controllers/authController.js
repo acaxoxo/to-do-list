@@ -45,6 +45,14 @@ exports.register = async (req, res) => {
             },
         });
     } catch (error) {
+        console.error('Register error:', error);
+        
+        // Handle MongoDB unique constraint error
+        if (error.code === 11000) {
+            const field = Object.keys(error.keyPattern)[0];
+            return res.status(400).json({ message: `${field} already exists` });
+        }
+        
         res.status(500).json({ message: 'Server error', error: error.message });
     }
 };
