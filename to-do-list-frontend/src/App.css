@@ -1,0 +1,40 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f9dbe7;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #e48fb2;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #d97da3;
+}
+
+::selection {
+  background: #f3c2d5;
+  color: #5f0f40;
+}
+
+*:focus-visible {
+  outline: 2px solid #e48fb2;
+  outline-offset: 2px;
+}
