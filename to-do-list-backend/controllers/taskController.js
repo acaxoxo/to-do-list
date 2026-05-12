@@ -1,6 +1,6 @@
 const Task = require('../models/Task');
 
-// Create task
+// Create flow: validate input -> build Task -> save -> respond
 exports.createTask = async (req, res) => {
     try {
         const { title, description, status, priority, dueDate } = req.body;
@@ -26,7 +26,7 @@ exports.createTask = async (req, res) => {
     }
 };
 
-// Get all tasks for user
+// Read list flow: query by user -> sort -> respond
 exports.getTasks = async (req, res) => {
     try {
         const tasks = await Task.find({ user: req.userId }).sort({ createdAt: -1 });
@@ -36,7 +36,7 @@ exports.getTasks = async (req, res) => {
     }
 };
 
-// Get single task
+// Read single flow: find by id -> authorize -> respond
 exports.getTask = async (req, res) => {
     try {
         const task = await Task.findById(req.params.id);
@@ -56,7 +56,7 @@ exports.getTask = async (req, res) => {
     }
 };
 
-// Update task
+// Update flow: find by id -> authorize -> validate -> mutate -> save
 exports.updateTask = async (req, res) => {
     try {
         let task = await Task.findById(req.params.id);
@@ -89,7 +89,7 @@ exports.updateTask = async (req, res) => {
     }
 };
 
-// Delete task
+// Delete flow: find by id -> authorize -> delete
 exports.deleteTask = async (req, res) => {
     try {
         const task = await Task.findById(req.params.id);
