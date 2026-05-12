@@ -24,6 +24,27 @@ export function validateEmail(email) {
     return { isValid: true, message: '' };
 }
 
+export function validateLoginIdentifier(identifier) {
+    if (!identifier) {
+        return { isValid: false, message: 'Warning: username or email is required' };
+    }
+
+    const value = identifier.trim();
+    if (!value) {
+        return { isValid: false, message: 'Warning: username or email is required' };
+    }
+
+    if (value.includes('@')) {
+        return validateEmail(value);
+    }
+
+    if (value.length < 3) {
+        return { isValid: false, message: 'Warning: username must be at least 3 characters' };
+    }
+
+    return { isValid: true, message: '' };
+}
+
 function decodeJwtPayload(token) {
     if (!token) return null;
     const parts = token.split('.');

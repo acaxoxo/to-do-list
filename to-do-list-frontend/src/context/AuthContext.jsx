@@ -11,6 +11,14 @@ export function AuthProvider({ children }) {
 
     useEffect(() => {
         const checkAuth = () => {
+            const sessionActive = sessionStorage.getItem('sessionActive');
+            if (!sessionActive) {
+                localStorage.removeItem('authToken');
+                localStorage.removeItem('user');
+                localStorage.removeItem('sessionExpiresAt');
+                localStorage.removeItem('tasks');
+            }
+
             const token = localStorage.getItem('authToken');
             const userData = localStorage.getItem('user');
             const expiresAt = localStorage.getItem('sessionExpiresAt');
@@ -45,11 +53,12 @@ export function AuthProvider({ children }) {
         checkAuth();
     }, []);
 
-    const login = async (email, password) => {
+    const login = async (identifier, password) => {
         setError(null);
         try {
-            const response = await authAPI.login(email, password);
+            const response = await authAPI.login(identifier, password);
             const expiresAt = getSessionExpiration(response.token);
+            sessionStorage.setItem('sessionActive', '1');
             localStorage.setItem('authToken', response.token);
             localStorage.setItem('user', JSON.stringify(response.user));
             localStorage.setItem('sessionExpiresAt', expiresAt);
@@ -66,6 +75,7 @@ export function AuthProvider({ children }) {
         try {
             const response = await authAPI.register(username, email, password);
             const expiresAt = getSessionExpiration(response.token);
+            sessionStorage.setItem('sessionActive', '1');
             localStorage.setItem('authToken', response.token);
             localStorage.setItem('user', JSON.stringify(response.user));
             localStorage.setItem('sessionExpiresAt', expiresAt);
@@ -77,12 +87,19 @@ export function AuthProvider({ children }) {
         }
     };
 
-    const logout = () => {
-        localStorage.removeItem('authToken');
-        localStorage.removeItem('user');
-        localStorage.removeItem('sessionExpiresAt');
-        localStorage.removeItem('tasks'); // Remove cached tasks
-        setUser(null);
+    const logout = async () => {
+        try {
+            await authAPI.logout();
+        } catch (err) {
+            console.warn('Logout API failed:', err.message);
+        } finally {
+            sessionStorage.removeItem('sessionActive');
+            localStorage.removeItem('authToken');
+            localStorage.removeItem('user');
+            localStorage.removeItem('sessionExpiresAt');
+            localStorage.removeItem('tasks'); // Remove cached tasks
+            setUser(null);
+        }
     };
 
     const value = {

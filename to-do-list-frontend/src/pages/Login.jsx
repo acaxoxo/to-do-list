@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { validateEmail } from '../utils/validation';
+import { validateLoginIdentifier } from '../utils/validation';
 
 const softPink = '#f9dbe7';
 const darkerPink = '#f3c2d5';
@@ -10,7 +10,7 @@ const accent = '#e48fb2';
 export default function Login() {
     const navigate = useNavigate();
     const { login } = useAuth();
-    const [email, setEmail] = useState('');
+    const [identifier, setIdentifier] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
@@ -19,14 +19,14 @@ export default function Login() {
         e.preventDefault();
         setError('');
         
-        if (!email || !password) {
+        if (!identifier || !password) {
             setError('Please fill in all fields');
             return;
         }
 
-        const emailValidation = validateEmail(email);
-        if (!emailValidation.isValid) {
-            setError(emailValidation.message);
+        const identifierValidation = validateLoginIdentifier(identifier);
+        if (!identifierValidation.isValid) {
+            setError(identifierValidation.message);
             return;
         }
 
@@ -38,7 +38,7 @@ export default function Login() {
         setIsLoading(true);
 
         try {
-            await login(email, password);
+            await login(identifier, password);
             navigate('/dashboard');
         } catch (err) {
             setError(err.message || 'Login failed. Please try again.');
@@ -64,18 +64,18 @@ export default function Login() {
                         )}
 
                         <div style={styles.inputGroup}>
-                            <label htmlFor="email" style={styles.label}>
-                                Email Address
+                            <label htmlFor="identifier" style={styles.label}>
+                                Username or Email
                             </label>
                             <input
-                                id="email"
-                                type="email"
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                                placeholder="Enter your email"
+                                id="identifier"
+                                type="text"
+                                value={identifier}
+                                onChange={(e) => setIdentifier(e.target.value)}
+                                placeholder="Enter your username or email"
                                 style={styles.input}
                                 disabled={isLoading}
-                                autoComplete="email"
+                                autoComplete="username"
                             />
                         </div>
 

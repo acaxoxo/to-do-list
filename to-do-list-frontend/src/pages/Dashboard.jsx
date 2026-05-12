@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { tasksAPI } from '../services/api';
 import Navbar from '../components/Navbar';
@@ -13,16 +13,26 @@ export default function Dashboard({ username }) {
     const [searchQuery, setSearchQuery] = useState('');
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
+    const [editingTaskId, setEditingTaskId] = useState(null);
+    const [editForm, setEditForm] = useState({
+        title: '',
+        description: '',
+        status: 'not-started',
+        priority: 'medium',
+        dueDate: '',
+    });
+    const [editErrors, setEditErrors] = useState({});
 
-    useEffect(() => {
-        fetchTasks();
-    }, []);
+    const normalizeTask = (task) => ({
+        ...task,
+        id: task.id || task._id,
+    });
 
-    const fetchTasks = async () => {
+    const fetchTasks = useCallback(async () => {
         try {
             setLoading(true);
             const result = await tasksAPI.getAll();
-            setTasks(result.tasks || []);
+            setTasks((result.tasks || []).map(normalizeTask));
             setError('');
         } catch (err) {
             console.error('Failed to fetch tasks:', err);
@@ -31,7 +41,24 @@ export default function Dashboard({ username }) {
         } finally {
             setLoading(false);
         }
-    };
+    }, []);
+
+    useEffect(() => {
+        fetchTasks();
+    }, [fetchTasks]);
+
+    useEffect(() => {
+        if (typeof window === 'undefined' || window.__inlineEditAnimInjected) return;
+        window.__inlineEditAnimInjected = true;
+        const style = document.createElement('style');
+        style.innerHTML = `
+            @keyframes inlineEditIn {
+                from { opacity: 0; transform: translateY(6px); }
+                to { opacity: 1; transform: translateY(0); }
+            }
+        `;
+        document.head.appendChild(style);
+    }, []);
 
     const user = username || JSON.parse(localStorage.getItem('user') || '{}').username || 'User';
 
@@ -40,8 +67,8 @@ export default function Dashboard({ username }) {
             return tasks;
         }
         const query = searchQuery.toLowerCase();
-        return tasks.filter(task => 
-            task.title.toLowerCase().includes(query) || 
+        return tasks.filter(task =>
+            task.title.toLowerCase().includes(query) ||
             (task.description && task.description.toLowerCase().includes(query))
         );
     }, [tasks, searchQuery]);
@@ -65,6 +92,106 @@ export default function Dashboard({ username }) {
 
     const handleSearch = (query) => {
         setSearchQuery(query);
+    };
+
+    const startInlineEdit = (task) => {
+        setEditingTaskId(task.id);
+        setEditForm({
+            title: task.title || '',
+            description: task.description || '',
+            status: task.status || 'not-started',
+            priority: task.priority || 'medium',
+            dueDate: task.dueDate ? task.dueDate.split('T')[0] : '',
+        });
+        setEditErrors({});
+    };
+
+    const cancelInlineEdit = () => {
+        setEditingTaskId(null);
+        setEditErrors({});
+    };
+
+    const validateInlineEdit = () => {
+        const newErrors = {};
+
+        if (!editForm.title.trim()) {
+            newErrors.title = 'Title is required';
+        } else if (editForm.title.trim().length < 3) {
+            newErrors.title = 'Title must be at least 3 characters';
+        } else if (editForm.title.trim().length > 100) {
+            newErrors.title = 'Title must not exceed 100 characters';
+        }
+
+        if (editForm.description.trim().length > 500) {
+            newErrors.description = 'Description must not exceed 500 characters';
+        }
+
+        if (editForm.dueDate) {
+            const dueDate = new Date(editForm.dueDate);
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+
+            if (dueDate < today) {
+                newErrors.dueDate = 'Due date must be today or in the future';
+            }
+        }
+
+        if (!['low', 'medium', 'high'].includes(editForm.priority)) {
+            newErrors.priority = 'Invalid priority selected';
+        }
+
+        if (!['not-started', 'in-progress', 'completed'].includes(editForm.status)) {
+            newErrors.status = 'Invalid status selected';
+        }
+
+        return newErrors;
+    };
+
+    const handleInlineChange = (e) => {
+        const { name, value } = e.target;
+        setEditForm(prev => ({
+            ...prev,
+            [name]: value,
+        }));
+
+        if (editErrors[name]) {
+            setEditErrors(prev => ({
+                ...prev,
+                [name]: '',
+            }));
+        }
+    };
+
+    const saveInlineEdit = async (taskId) => {
+        if (!taskId) {
+            setEditErrors({ submit: 'Task ID missing. Please refresh the page.' });
+            return;
+        }
+
+        const newErrors = validateInlineEdit();
+        if (Object.keys(newErrors).length > 0) {
+            setEditErrors(newErrors);
+            return;
+        }
+
+        try {
+            const result = await tasksAPI.update(taskId, {
+                title: editForm.title.trim(),
+                description: editForm.description.trim(),
+                status: editForm.status,
+                priority: editForm.priority,
+                dueDate: editForm.dueDate || null,
+            });
+
+            const normalized = normalizeTask(result.task || {});
+            setTasks(prev => prev.map(task => (
+                task.id === taskId ? normalized : task
+            )));
+            setEditingTaskId(null);
+            setEditErrors({});
+        } catch (err) {
+            setEditErrors({ submit: err.message });
+        }
     };
 
     return (
@@ -91,56 +218,185 @@ export default function Dashboard({ username }) {
 
             {!loading && !error && (
                 <div style={styles.cardsWrapper}>
-                <section style={styles.card}>
-                    <div style={styles.cardHeader}>
-                        <h2 style={styles.cardTitle}>To-Do Lists</h2>
-                        <button
-                            style={styles.addBtn}
-                            onClick={() => navigate('/todoinput')}
-                            aria-label="Add Task"
-                        >
-                            + Add Task
-                        </button>
-                    </div>
-                    <ul style={styles.taskList}>
-                        {filteredTasks.map(task => (
-                            <li
-                                key={task.id}
-                                style={styles.taskItem}
-                                onClick={() => navigate(`/todoitem/${task.id}`)}
-                                role="button"
-                                tabIndex={0}
-                                onKeyDown={e => e.key === 'Enter' && navigate(`/todoitem/${task.id}`)}
+                    <section style={styles.card}>
+                        <div style={styles.cardHeader}>
+                            <h2 style={styles.cardTitle}>To-Do Lists</h2>
+                            <button
+                                style={styles.addBtn}
+                                onClick={() => navigate('/todoinput')}
+                                aria-label="Add Task"
                             >
-                                <div style={styles.taskContent}>
-                                    <span style={styles.taskTitle}>{task.title}</span>
-                                    {task.dueDate && (
-                                        <span style={styles.dueDate}>
-                                            📅 {new Date(task.dueDate).toLocaleDateString('id-ID', { month: 'short', day: 'numeric' })}
-                                        </span>
+                                + Add Task
+                            </button>
+                        </div>
+                        <ul style={styles.taskList}>
+                            {filteredTasks.map(task => (
+                                <li
+                                    key={task.id}
+                                    style={{
+                                        ...styles.taskItem,
+                                        ...priorityStripe(task.priority),
+                                    }}
+                                    onClick={() => {
+                                        if (!editingTaskId) {
+                                            navigate(`/todoitem/${task.id}`);
+                                        }
+                                    }}
+                                    role="button"
+                                    tabIndex={0}
+                                    onKeyDown={e => {
+                                        if (e.key === 'Enter' && !editingTaskId) {
+                                            navigate(`/todoitem/${task.id}`);
+                                        }
+                                    }}
+                                >
+                                    {editingTaskId === task.id ? (
+                                        <div style={styles.inlineEditor} onClick={e => e.stopPropagation()}>
+                                            <div style={styles.inlineHeader}>
+                                                <span style={styles.inlineTitle}>Edit Task</span>
+                                                <span style={styles.inlineHint}>Update details without leaving the list</span>
+                                            </div>
+                                            {Object.keys(editErrors).length > 0 && (
+                                                <div style={styles.inlineErrorBox}>
+                                                    {Object.values(editErrors).map((message, index) => (
+                                                        <div key={index} style={styles.inlineErrorText}>• {message}</div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                            <div style={styles.inlineRow}>
+                                                <div style={{ ...styles.inlineField, flex: '7 1 280px' }}>
+                                                    <label style={styles.inlineLabel}>Title</label>
+                                                    <input
+                                                        name="title"
+                                                        value={editForm.title}
+                                                        onChange={handleInlineChange}
+                                                        style={{
+                                                            ...styles.inlineInput,
+                                                            ...(editErrors.title ? styles.inputError : {}),
+                                                        }}
+                                                        maxLength={100}
+                                                    />
+                                                </div>
+                                                <div style={{ ...styles.inlineField, flex: '3 1 140px' }}>
+                                                    <label style={styles.inlineLabel}>Status</label>
+                                                    <select
+                                                        name="status"
+                                                        value={editForm.status}
+                                                        onChange={handleInlineChange}
+                                                        style={{
+                                                            ...styles.inlineSelect,
+                                                            ...(editErrors.status ? styles.inputError : {}),
+                                                        }}
+                                                    >
+                                                        <option value="not-started">Pending</option>
+                                                        <option value="in-progress">In Progress</option>
+                                                        <option value="completed">Done</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                            <div style={styles.inlineRow}>
+                                                <div style={styles.inlineFieldWide}>
+                                                    <label style={styles.inlineLabel}>Description</label>
+                                                    <input
+                                                        name="description"
+                                                        value={editForm.description}
+                                                        onChange={handleInlineChange}
+                                                        style={{
+                                                            ...styles.inlineInput,
+                                                            ...(editErrors.description ? styles.inputError : {}),
+                                                        }}
+                                                        placeholder="Add a short description"
+                                                        maxLength={500}
+                                                    />
+                                                </div>
+                                            </div>
+                                            <div style={styles.inlineRow}>
+                                                <div style={styles.inlineField}>
+                                                    <label style={styles.inlineLabel}>Priority</label>
+                                                    <select
+                                                        name="priority"
+                                                        value={editForm.priority}
+                                                        onChange={handleInlineChange}
+                                                        style={{
+                                                            ...styles.inlineSelect,
+                                                            ...(editErrors.priority ? styles.inputError : {}),
+                                                        }}
+                                                    >
+                                                        <option value="low">Low</option>
+                                                        <option value="medium">Medium</option>
+                                                        <option value="high">High</option>
+                                                    </select>
+                                                </div>
+                                                <div style={styles.inlineField}>
+                                                    <label style={styles.inlineLabel}>Due Date</label>
+                                                    <input
+                                                        name="dueDate"
+                                                        type="date"
+                                                        value={editForm.dueDate}
+                                                        onChange={handleInlineChange}
+                                                        style={{
+                                                            ...styles.inlineInput,
+                                                            ...(editErrors.dueDate ? styles.inputError : {}),
+                                                        }}
+                                                    />
+                                                </div>
+                                            </div>
+                                            <div style={styles.inlineActions}>
+                                                <button
+                                                    type="button"
+                                                    onClick={cancelInlineEdit}
+                                                    style={styles.inlineCancel}
+                                                >
+                                                    Cancel
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => saveInlineEdit(task.id)}
+                                                    style={styles.inlineSave}
+                                                >
+                                                    Save
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <div style={styles.taskContent}>
+                                                <span style={styles.taskTitle}>{task.title}</span>
+                                                {task.dueDate && (
+                                                    <span style={styles.dueDate}>
+                                                        📅 {new Date(task.dueDate).toLocaleDateString('id-ID', { month: 'short', day: 'numeric' })}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <div style={styles.taskBadges}>
+                                                <span style={{ ...styles.statusBadge, ...badgeColor(task.status) }}>
+                                                    {label(task.status)}
+                                                </span>
+                                                <button
+                                                    type="button"
+                                                    style={styles.inlineEditButton}
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        startInlineEdit(task);
+                                                    }}
+                                                    aria-label="Edit task"
+                                                >
+                                                    ...
+                                                </button>
+                                            </div>
+                                        </>
                                     )}
-                                </div>
-                                <div style={styles.taskBadges}>
-                                    {task.priority && (
-                                        <span style={{ ...styles.priorityBadge, ...priorityColor(task.priority) }}>
-                                            {task.priority}
-                                        </span>
-                                    )}
-                                    <span style={{ ...styles.statusBadge, ...badgeColor(task.status) }}>
-                                        {label(task.status)}
-                                    </span>
-                                </div>
-                            </li>
-                        ))}
-                        {filteredTasks.length === 0 && (
-                            <li style={styles.empty}>
-                                {searchQuery ? 'No tasks found matching your search.' : 'No tasks yet.'}
-                            </li>
-                        )}
-                    </ul>
-                </section>
+                                </li>
+                            ))}
+                            {filteredTasks.length === 0 && (
+                                <li style={styles.empty}>
+                                    {searchQuery ? 'No tasks found matching your search.' : 'No tasks yet.'}
+                                </li>
+                            )}
+                        </ul>
+                    </section>
 
-                <section style={styles.card}>
+                    <section style={styles.card}>
                         <h2 style={styles.cardTitle}>Task Status</h2>
                         <div style={styles.progressGroup}>
                             <StatusBar label="Completed" value={stats.pctCompleted} color="#76c893" />
@@ -153,20 +409,20 @@ export default function Dashboard({ username }) {
                             <span>Active: {stats.inProgress}</span>
                             <span>Pending: {stats.notStarted}</span>
                         </div>
-                </section>
+                    </section>
 
-                <section style={styles.card}>
-                    <h2 style={styles.cardTitle}>Completed Tasks</h2>
-                    <ul style={styles.completedList}>
-                        {completedTasks.map(t => (
-                            <li key={t.id} style={styles.completedItem}>
-                                <Link style={styles.completedLink} to={`/todoitem/${t.id}`}>{t.title}</Link>
-                            </li>
-                        ))}
-                        {completedTasks.length === 0 && <li style={styles.empty}>No completed tasks.</li>}
-                    </ul>
-                </section>
-            </div>
+                    <section style={styles.card}>
+                        <h2 style={styles.cardTitle}>Completed Tasks</h2>
+                        <ul style={styles.completedList}>
+                            {completedTasks.map(t => (
+                                <li key={t.id} style={styles.completedItem}>
+                                    <Link style={styles.completedLink} to={`/todoitem/${t.id}`}>{t.title}</Link>
+                                </li>
+                            ))}
+                            {completedTasks.length === 0 && <li style={styles.empty}>No completed tasks.</li>}
+                        </ul>
+                    </section>
+                </div>
             )}
         </div>
     );
@@ -190,29 +446,22 @@ function label(status) {
     return 'Pending';
 }
 
-
 function badgeColor(status) {
     switch (status) {
         case 'completed':
-            return { background: '#76c893', color: '#fff' };
+            return { background: '#e8f6ef', color: '#2b7a57' };
         case 'in-progress':
-            return { background: '#ffafcc', color: '#5f0f40' };
+            return { background: '#fde9f1', color: '#8b3b5d' };
         default:
-            return { background: '#bdb2ff', color: '#2d2d2d' };
+            return { background: '#f0efff', color: '#3c3c6b' };
     }
 }
 
-function priorityColor(priority) {
-    switch (priority) {
-        case 'high':
-            return { background: '#ff6b6b', color: '#fff' };
-        case 'medium':
-            return { background: '#ffa500', color: '#fff' };
-        case 'low':
-            return { background: '#74c0fc', color: '#fff' };
-        default:
-            return { background: '#ced4da', color: '#495057' };
-    }
+function priorityStripe(priority) {
+    if (priority === 'high') return { borderLeft: '4px solid #ff6b6b' };
+    if (priority === 'medium') return { borderLeft: '4px solid #f2b066' };
+    if (priority === 'low') return { borderLeft: '4px solid #8cc9f5' };
+    return { borderLeft: '4px solid #efdae5' };
 }
 
 const styles = {
@@ -285,7 +534,7 @@ const styles = {
         background: '#fffffffa',
         backdropFilter: 'blur(4px)',
         borderRadius: '18px',
-        padding: '1.1rem 1.1rem 1.3rem',
+        padding: '1.1rem 1.4rem 1.3rem',
         boxShadow: '0 8px 20px -6px rgba(240,120,160,0.25)',
         border: `2px solid ${darkerPink}`,
         display: 'flex',
@@ -300,211 +549,258 @@ const styles = {
         marginBottom: '.5rem',
     },
     cardTitle: {
-        fontSize: '1.15rem',
-        fontWeight: 700,
         margin: 0,
-        color: '#bf4d79',
-        letterSpacing: '.3px',
+        fontSize: '1.2rem',
+        color: '#d16b93',
+        fontWeight: 700,
     },
     addBtn: {
         background: accent,
-        color: '#fff',
         border: 'none',
-        padding: '.5rem .85rem',
-        fontSize: '.75rem',
+        color: '#fff',
+        padding: '.5rem 1rem',
         borderRadius: '999px',
         cursor: 'pointer',
-        letterSpacing: '.5px',
         fontWeight: 600,
-        boxShadow: '0 4px 12px -3px rgba(228,143,178,.5)',
-        transition: '.25s',
     },
     taskList: {
         listStyle: 'none',
+        padding: '0 .2rem',
         margin: 0,
-        padding: 0,
-        overflowY: 'auto',
-        scrollbarWidth: 'thin',
-        flexGrow: 1,
         display: 'flex',
         flexDirection: 'column',
-        gap: '.55rem',
+        gap: '.75rem',
+        overflowY: 'auto',
     },
     taskItem: {
+        background: '#fff',
+        borderRadius: '14px',
+        padding: '.85rem .9rem',
+        border: `1px solid ${darkerPink}`,
         display: 'flex',
-        justifyContent: 'space-between',
         alignItems: 'center',
-        gap: '.5rem',
-        padding: '.6rem .75rem',
-        borderRadius: '12px',
-        background: '#ffeaf2',
-        fontSize: '.8rem',
-        fontWeight: 500,
+        justifyContent: 'space-between',
+        gap: '1rem',
         cursor: 'pointer',
-        transition: 'background .25s, transform .25s',
-        outline: 'none',
+        transition: 'all .2s ease',
+        boxShadow: '0 6px 14px -8px rgba(240,120,160,.3)',
     },
     taskContent: {
         display: 'flex',
-        flexDirection: 'column',
-        gap: '.2rem',
-        flex: 1,
-        minWidth: 0,
+        alignItems: 'center',
+        gap: '.6rem',
+        flexWrap: 'wrap',
     },
     taskTitle: {
-        whiteSpace: 'nowrap',
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
+        fontWeight: 600,
+        color: '#1f2a44',
     },
     dueDate: {
-        fontSize: '.65rem',
-        color: '#666',
-        whiteSpace: 'nowrap',
+        fontSize: '.8rem',
+        color: '#a56c84',
+        background: '#fff0f6',
+        padding: '.2rem .55rem',
+        borderRadius: '999px',
     },
     taskBadges: {
         display: 'flex',
-        gap: '.3rem',
-        flexShrink: 0,
-    },
-    priorityBadge: {
-        fontSize: '.6rem',
-        padding: '.2rem .4rem',
-        borderRadius: '8px',
-        fontWeight: 600,
-        letterSpacing: '.4px',
-        textTransform: 'uppercase',
-        whiteSpace: 'nowrap',
-    },
-    progressShell: {
-        position: 'relative',
-        width: '80px',
-        height: '8px',
-        borderRadius: '999px',
-        background: '#f4d2de',
-        overflow: 'hidden',
-    },
-    progressFill: {
-        position: 'absolute',
-        left: 0,
-        top: 0,
-        bottom: 0,
-        width: '0%',
-        background: accent,
-        borderRadius: 'inherit',
-        transition: 'width .6s cubic-bezier(.65,.05,.36,1)',
+        alignItems: 'center',
+        gap: '.35rem',
+        flexWrap: 'nowrap',
     },
     statusBadge: {
-        fontSize: '.6rem',
-        padding: '.2rem .4rem',
-        borderRadius: '8px',
-        fontWeight: 600,
-        letterSpacing: '.4px',
-        textTransform: 'uppercase',
-        whiteSpace: 'nowrap',
+        padding: '.3rem .75rem',
+        borderRadius: '999px',
+        fontSize: '.72rem',
+        fontWeight: 700,
+        lineHeight: 1.2,
     },
     empty: {
-        fontSize: '.75rem',
-        color: '#777',
-        padding: '.75rem',
+        color: '#8a8a8a',
+        padding: '.6rem 0',
         textAlign: 'center',
-        background: '#f7f7f7',
-        borderRadius: '10px',
+        fontStyle: 'italic',
     },
     progressGroup: {
         display: 'flex',
         flexDirection: 'column',
-        gap: '.65rem',
-        marginTop: '.4rem',
-        flexGrow: 1,
+        gap: '.8rem',
+        marginTop: '.5rem',
     },
     statusRow: {
         display: 'grid',
-        gridTemplateColumns: '85px 1fr 44px',
+        gridTemplateColumns: '90px 1fr 48px',
         alignItems: 'center',
-        gap: '.55rem',
+        gap: '.6rem',
     },
     statusLabel: {
-        fontSize: '.65rem',
+        fontSize: '.85rem',
         fontWeight: 600,
-        textTransform: 'uppercase',
-        letterSpacing: '.8px',
-        color: '#555',
+        color: '#5f0f40',
     },
     barTrack: {
-        position: 'relative',
-        height: '10px',
-        borderRadius: '6px',
-        background: '#f4d2de',
+        height: '8px',
+        background: '#f3c2d5',
+        borderRadius: '999px',
         overflow: 'hidden',
     },
     barFill: {
-        position: 'absolute',
-        inset: 0,
-        width: '0%',
-        borderRadius: 'inherit',
-        transition: 'width .6s cubic-bezier(.65,.05,.36,1)',
+        height: '100%',
+        borderRadius: '999px',
     },
     barValue: {
-        fontSize: '.65rem',
+        fontSize: '.8rem',
         fontWeight: 600,
+        color: '#5f0f40',
         textAlign: 'right',
-        color: '#444',
     },
     miniCounts: {
-        marginTop: 'auto',
         display: 'flex',
         flexWrap: 'wrap',
-        gap: '.6rem',
-        fontSize: '.6rem',
-        fontWeight: 600,
-        letterSpacing: '.5px',
-        color: '#6a3551',
+        gap: '.6rem 1rem',
+        marginTop: '1rem',
+        color: '#6b6b6b',
+        fontSize: '.85rem',
     },
     completedList: {
         listStyle: 'none',
-        margin: '.4rem 0 0',
         padding: 0,
-        overflowY: 'auto',
-        flexGrow: 1,
+        margin: '.6rem 0 0',
         display: 'flex',
         flexDirection: 'column',
         gap: '.5rem',
     },
     completedItem: {
-        background: '#e9f9ef',
-        padding: '.55rem .7rem',
-        borderRadius: '12px',
-        fontSize: '.7rem',
-        fontWeight: 600,
-        letterSpacing: '.4px',
-        display: 'flex',
-        alignItems: 'center',
+        padding: '.4rem .6rem',
+        background: '#fdf2f7',
+        borderRadius: '10px',
+        border: `1px solid ${darkerPink}`,
     },
     completedLink: {
-        color: '#2e7d53',
         textDecoration: 'none',
-        flex: 1,
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-        whiteSpace: 'nowrap',
+        color: '#c95b87',
+        fontWeight: 600,
     },
-    '@media(maxWidth:600px)': {},
+    inlineEditor: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '.75rem',
+        width: '100%',
+        background: 'linear-gradient(160deg, #fff6fa 0%, #ffffff 100%)',
+        borderRadius: '14px',
+        padding: '.9rem',
+        border: '1px dashed #f3c2d5',
+        animation: 'inlineEditIn .18s ease-out',
+    },
+    inlineHeader: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '.15rem',
+    },
+    inlineTitle: {
+        fontWeight: 700,
+        color: '#d16b93',
+        fontSize: '.95rem',
+        letterSpacing: '.2px',
+    },
+    inlineHint: {
+        color: '#a56c84',
+        fontSize: '.78rem',
+    },
+    inlineRow: {
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: '.6rem',
+    },
+    inlineField: {
+        flex: '1 1 180px',
+        minWidth: '160px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '.35rem',
+    },
+    inlineFieldWide: {
+        flex: '1 1 320px',
+        minWidth: '240px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '.35rem',
+    },
+    inlineLabel: {
+        fontSize: '.7rem',
+        textTransform: 'capitalize',
+        letterSpacing: '.02em',
+        color: '#9b6a7c',
+        fontWeight: 500,
+    },
+    inlineInput: {
+        flex: 1,
+        minWidth: '180px',
+        padding: '.6rem .75rem',
+        borderRadius: '12px',
+        border: '1px solid #f3e3ea',
+        fontSize: '.9rem',
+        outline: 'none',
+        background: '#fff',
+        boxShadow: '0 10px 20px -16px rgba(209,107,147,.35)',
+    },
+    inlineSelect: {
+        padding: '.6rem .75rem',
+        borderRadius: '12px',
+        border: '1px solid #f3e3ea',
+        fontSize: '.9rem',
+        background: '#fff',
+        boxShadow: '0 10px 20px -16px rgba(209,107,147,.35)',
+    },
+    inlineActions: {
+        display: 'flex',
+        justifyContent: 'flex-end',
+        gap: '.6rem',
+    },
+    inlineSave: {
+        background: 'linear-gradient(140deg, #e48fb2, #d16b93)',
+        color: '#fff',
+        border: 'none',
+        borderRadius: '999px',
+        padding: '.55rem 1.2rem',
+        cursor: 'pointer',
+        fontWeight: 600,
+        boxShadow: '0 8px 14px -8px rgba(212,108,150,.6)',
+    },
+    inlineCancel: {
+        background: '#fff',
+        color: accent,
+        border: `1px solid ${accent}`,
+        borderRadius: '999px',
+        padding: '.55rem 1.2rem',
+        cursor: 'pointer',
+        fontWeight: 600,
+    },
+    inlineEditButton: {
+        marginLeft: '.4rem',
+        background: '#fff',
+        border: '1px solid #f0cadb',
+        color: '#92506d',
+        borderRadius: '999px',
+        padding: '.1rem .5rem .18rem',
+        fontSize: '.95rem',
+        cursor: 'pointer',
+        fontWeight: 600,
+        lineHeight: 1.2,
+    },
+    inlineErrorBox: {
+        background: '#ffe0e0',
+        border: '1px solid #ffcdd2',
+        color: '#c62828',
+        padding: '.55rem .75rem',
+        borderRadius: '10px',
+        fontSize: '.8rem',
+    },
+    inlineErrorText: {
+        lineHeight: 1.3,
+    },
+    inputError: {
+        borderColor: '#ef5b5b',
+        boxShadow: '0 0 0 2px rgba(239,91,91,.2)',
+    },
 };
-
-const addGlobalHover = () => {
-    const style = document.createElement('style');
-    style.innerHTML = `
-        .task-hover:hover { background:#ffd3e4 !important; transform:translateY(-2px); }
-        button:hover { filter:brightness(.92); transform:translateY(-2px); }
-        button:active { transform:translateY(0); }
-        @media (max-width: 700px){
-            .task-hover { font-size:.75rem; }
-        }
-    `;
-    document.head.appendChild(style);
-};
-
-if (typeof window !== 'undefined' && !window.__dashboardHoverInjected) {
-    window.__dashboardHoverInjected = true;
-    addGlobalHover();
-}

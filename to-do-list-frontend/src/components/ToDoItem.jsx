@@ -20,19 +20,30 @@ export default function ToDoItem() {
     });
     const [errors, setErrors] = useState({});
 
+    const normalizeTask = (task) => ({
+        ...task,
+        id: task.id || task._id,
+    });
+
     useEffect(() => {
+        if (!id) {
+            navigate('/dashboard');
+            return;
+        }
+
         const fetchTask = async () => {
             try {
                 const result = await tasksAPI.getOne(id);
                 const foundTask = result.task;
                 if (foundTask) {
-                    setTask(foundTask);
+                    const normalized = normalizeTask(foundTask);
+                    setTask(normalized);
                     setFormData({
-                        title: foundTask.title,
-                        description: foundTask.description || '',
-                        status: foundTask.status,
-                        priority: foundTask.priority || 'medium',
-                        dueDate: foundTask.dueDate ? foundTask.dueDate.split('T')[0] : '',
+                        title: normalized.title,
+                        description: normalized.description || '',
+                        status: normalized.status,
+                        priority: normalized.priority || 'medium',
+                        dueDate: normalized.dueDate ? normalized.dueDate.split('T')[0] : '',
                     });
                 } else {
                     navigate('/dashboard');
@@ -138,7 +149,7 @@ export default function ToDoItem() {
         if (!t) return 0;
         if (t.status === 'not-started') return 0;
         if (t.status === 'completed') return 100;
-        const base = (t.id || '') + (t.title || '');
+        const base = (t.id || t._id || '') + (t.title || '');
         let hash = 0;
         for (let i = 0; i < base.length; i++) {
             hash = (hash * 31 + base.charCodeAt(i)) >>> 0;

@@ -1,4 +1,5 @@
 const User = require('../models/User');
+const TokenBlacklist = require('../models/TokenBlacklist');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { sendPasswordResetEmail } = require('../utils/email');
@@ -71,30 +72,37 @@ exports.register = async (req, res) => {
 // Login
 exports.login = async (req, res) => {
     try {
-        const { email, password } = req.body;
-        
+        const { identifier, email, password } = req.body;
+
         // Validation
-        if (!email || !password) {
-            return res.status(400).json({ message: 'Please provide email and password' });
+        const rawIdentifier = identifier || email;
+        if (!rawIdentifier || !password) {
+            return res.status(400).json({ message: 'Please provide username/email and password' });
         }
-        
+
+        const loginId = rawIdentifier.trim();
+        const isEmail = /@/.test(loginId);
+        const query = isEmail
+            ? { email: loginId.toLowerCase() }
+            : { username: loginId };
+
         // Find user
-        const user = await User.findOne({ email });
+        const user = await User.findOne(query);
         if (!user) {
-            return res.status(401).json({ message: 'Invalid email or password' });
+            return res.status(401).json({ message: 'Invalid username/email or password' });
         }
-        
+
         // Check password
         const isMatch = await user.matchPassword(password);
         if (!isMatch) {
-            return res.status(401).json({ message: 'Invalid email or password' });
+            return res.status(401).json({ message: 'Invalid username/email or password' });
         }
-        
+
         // Create JWT token
         const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
             expiresIn: '7d',
         });
-        
+
         res.json({
             message: 'User logged in successfully',
             token,
@@ -104,6 +112,28 @@ exports.login = async (req, res) => {
                 email: user.email,
             },
         });
+    } catch (error) {
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
+// Logout
+exports.logout = async (req, res) => {
+    try {
+        const token = req.header('Authorization')?.replace('Bearer ', '');
+
+        if (!token) {
+            return res.status(400).json({ message: 'No token provided' });
+        }
+
+        const decoded = jwt.decode(token);
+        const expiresAt = decoded && decoded.exp
+            ? new Date(decoded.exp * 1000)
+            : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+        await TokenBlacklist.create({ token, expiresAt });
+
+        res.json({ message: 'Logged out successfully' });
     } catch (error) {
         res.status(500).json({ message: 'Server error', error: error.message });
     }
